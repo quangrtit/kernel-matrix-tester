@@ -1,0 +1,19 @@
+# Minimal Falco config for kernel testing
+engine:
+  kind: ebpf
+
+output:
+  enabled: true
+  stdout: true
+
+file_output:
+  enabled: false
+
+syslog_output:
+  enabled: false
+
+# Disable email and other outputs
+email_output:
+  enabled: false
+
+# Minimal rule loading - just test syscall events

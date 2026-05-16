@@ -1,0 +1,24 @@
+# Binaries and build artifacts
+*.ko
+*.o
+*.img
+vmlinuz
+
+# Directories with generated content
+/kernels/*
+/initramfs/*
+/modules/*
+/results/*
+
+# Temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# Development notes and drafts
+Claude.md
+IMPLEMENTATION.md
+
+# Keep directory structure but ignore content
+!.gitkeep
