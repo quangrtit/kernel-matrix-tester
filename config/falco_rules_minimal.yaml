@@ -1,0 +1,62 @@
+# Minimal Falco rules for kernel module / eBPF probe testing in QEMU
+# No plugin requirements — pure syscall-based detection only
+# Compatible with Falco 0.35+ using kmod or ebpf engine
+
+# ── Macros ────────────────────────────────────────────────────────────────────
+- macro: open_write
+  condition: (evt.type in (open,openat,openat2) and evt.is_open_write=true and fd.typechar='f' and fd.num>=0)
+
+- macro: open_read
+  condition: (evt.type in (open,openat,openat2) and evt.is_open_read=true and fd.typechar='f' and fd.num>=0)
+
+- macro: spawned_process
+  condition: (evt.type in (execve, execveat))
+
+# ── Rules ─────────────────────────────────────────────────────────────────────
+- rule: Test - Write below /etc
+  desc: Detect any file write under /etc (test event trigger)
+  condition: >
+    open_write and fd.name startswith /etc
+    and not fd.name = /etc/ld.so.cache
+    and not fd.name startswith /etc/falco
+  output: >
+    File written in /etc
+    (evt=%evt.type file=%fd.name user=%user.name cmd=%proc.cmdline pid=%proc.pid)
+  priority: WARNING
+  tags: [test, filesystem]
+
+- rule: Test - Read process environ
+  desc: Detect reading of /proc/*/environ (test event trigger)
+  condition: open_read and fd.name glob /proc/*/environ
+  output: >
+    Process environ read
+    (file=%fd.name user=%user.name cmd=%proc.cmdline pid=%proc.pid)
+  priority: WARNING
+  tags: [test, process]
+
+- rule: Test - Shell spawned
+  desc: Detect shell process execution (test event trigger)
+  condition: spawned_process and proc.name in (sh, ash, bash, dash, ksh)
+  output: >
+    Shell process spawned
+    (shell=%proc.name parent=%proc.pname user=%user.name cmd=%proc.cmdline pid=%proc.pid)
+  priority: NOTICE
+  tags: [test, process]
+
+- rule: Test - Execute from /tmp
+  desc: Detect binary execution from /tmp (test event trigger)
+  condition: spawned_process and proc.exe startswith /tmp
+  output: >
+    Binary executed from /tmp
+    (exe=%proc.exe user=%user.name cmd=%proc.cmdline pid=%proc.pid parent=%proc.pname)
+  priority: CRITICAL
+  tags: [test, process]
+
+- rule: Test - Read /etc/shadow
+  desc: Detect read of /etc/shadow (test event trigger)
+  condition: open_read and fd.name = /etc/shadow
+  output: >
+    Sensitive file read /etc/shadow
+    (user=%user.name cmd=%proc.cmdline pid=%proc.pid)
+  priority: CRITICAL
+  tags: [test, filesystem]

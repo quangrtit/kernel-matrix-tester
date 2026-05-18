@@ -1,4 +1,42 @@
-ubuntu:20.04:5.15.45
-debian:11:5.10.0-30-amd64
+# Falco 0.43.1 — driver 9.1.0+driver — kernels < 5.4 only
+# Format: distro:version:kernel_version
+
+# =========================
+# CentOS 7 (3.10 series)
+# kernel <4.14 => kmod only
+# =========================
+
+centos:7:3.10.0-957
+centos:7:3.10.0-1062
+centos:7:3.10.0-1127
 centos:7:3.10.0-1160
-rocky:9:5.14.0-611.11.1.el9_7
+
+# =========================
+# CentOS 8 (4.18 series)
+# eBPF + kmod
+# =========================
+
+centos:8:4.18.0-240.el8
+centos:8:4.18.0-348.el8
+centos:8:4.18.0-425.el8
+centos:8:4.18.0-477.el8
+centos:8:4.18.0-553.el8
+
+# =========================
+# AlmaLinux 8
+# EL8 clone nhưng có khác build
+# =========================
+
+almalinux:8:4.18.0-348.el8
+almalinux:8:4.18.0-425.el8
+almalinux:8:4.18.0-513.el8
+almalinux:8:4.18.0-553.el8_10
+
+# =========================
+# AlmaLinux 9
+# kernel 5.14 -> vượt phạm vi
+# chỉ thêm nếu muốn test tương thích
+# =========================
+
+# almalinux:9:5.14.0-70.el9
+# almalinux:9:5.14.0-362.el9

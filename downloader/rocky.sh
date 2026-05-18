@@ -1,4 +1,7 @@
 #!/bin/bash
+# Download Rocky Linux kernel vmlinuz from Rocky vault repositories
+set -e
+
 KERNEL_VER=$1
 OUTPUT_DIR=$2
 

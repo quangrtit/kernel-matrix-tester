@@ -95,11 +95,3 @@ fi
 
 cp "$VMLINUZ" "$OUTPUT_DIR/vmlinuz"
 echo "✓ Downloaded vmlinuz → $OUTPUT_DIR/vmlinuz"
-VMLINUZ=$(find "$TEMP_DIR" -name "vmlinuz*" -type f 2>/dev/null | head -1)
-if [[ -z "$VMLINUZ" ]]; then
-    echo "✗ vmlinuz not found inside .deb"
-    exit 1
-fi
-
-cp "$VMLINUZ" "$OUTPUT_DIR/vmlinuz"
-echo "✓ Downloaded vmlinuz → $OUTPUT_DIR/vmlinuz"

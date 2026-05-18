@@ -1,10 +1,15 @@
-# Minimal Falco config for kernel testing
+# Falco config for kernel module testing in QEMU
+# engine.kind is overridden at runtime by the init script (kmod or ebpf)
 engine:
-  kind: ebpf
+  kind: kmod
 
-output:
+# No plugins needed for bare-metal syscall testing
+plugins: []
+load_plugins: []
+
+# Output to stdout only (Falco 0.35+ uses stdout_output, not output.stdout)
+stdout_output:
   enabled: true
-  stdout: true
 
 file_output:
   enabled: false
@@ -12,8 +17,22 @@ file_output:
 syslog_output:
   enabled: false
 
-# Disable email and other outputs
-email_output:
+# Disable gRPC, webserver, telemetry
+grpc:
+  enabled: false
+grpc_output:
   enabled: false
 
-# Minimal rule loading - just test syscall events
+webserver:
+  enabled: false
+
+telemetry:
+  enabled: false
+
+buffered_outputs: false
+json_output: true
+time_format_iso_8601: false
+
+# Reduce noise — only WARNING and above by default
+log_level: info
+priority: warning
