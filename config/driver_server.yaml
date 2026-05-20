@@ -1,0 +1,17 @@
+# Falco driver server configuration
+# Downloaders look here first, then fall back to DRIVER_BASE_URL env var.
+#
+# Switch base_url to your own server when ready:
+#   base_url: https://your-server.example.com
+#   driver_version: "9.1.0+driver"
+#
+# Expected URL layout (mirroring Falco CloudFront):
+#   {base_url}/driver/{driver_version}/x86_64/falco_{distro}_{uname_r}_{rev}.ko
+#   {base_url}/driver/{driver_version}/x86_64/falco_{distro}_{uname_r}_{rev}.o
+#
+# The S3/CloudFront XML listing used for fallback search:
+#   {base_url}/?prefix=driver/{driver_version}/x86_64
+
+base_url: https://d20hasrqv82i0q.cloudfront.net
+listing_url: https://falco-distribution.s3-eu-west-1.amazonaws.com
+driver_version: "9.1.0+driver"

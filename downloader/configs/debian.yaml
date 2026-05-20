@@ -1,0 +1,49 @@
+title: Debian kernel images (vmlinuz) — snapshot.debian.org
+
+start_url: https://snapshot.debian.org/package/?cat=l
+base_url: https://snapshot.debian.org/
+download_folder: vmlinuz-debian
+group: debian
+
+jobs:
+  - name: linux2
+    # Debian 6 (squeeze): 2.6.32 — source package "linux-2.6"
+    # Point directly to the final squeeze release (EOL 2016, no more updates)
+    start_url: https://snapshot.debian.org/package/linux-2.6/2.6.32-48squeeze20/
+    folder_patterns: []
+    file_patterns:
+      # \d before -amd64_ ensures we skip vserver/xen/openvz variants
+      - .linux-image.[0-9].\d-amd64_.(amd64).deb
+
+  - name: linux3
+    # Debian 7 (wheezy): 3.2.x  — no -unsigned suffix
+    folder_patterns:
+      - ^linux$
+      - ^3\.\d+\.\d+
+    file_patterns:
+      - .linux-image.[0-9].\d-amd64_.(amd64).deb
+
+  - name: linux4
+    # Debian 9 (stretch): 4.9.x  Debian 10 (buster): 4.19.x
+    folder_patterns:
+      - ^linux$
+      - ^4\.\d+\.\d+
+    file_patterns:
+      - .linux-image.[0-9].\d-amd64_.(amd64).deb
+      - .linux-image.[0-9].\d-amd64-unsigned.(amd64).deb
+
+  - name: linux5
+    # Debian 11 (bullseye): 5.10.x
+    folder_patterns:
+      - ^linux$
+      - ^5\.\d+\.\d+
+    file_patterns:
+      - .linux-image.[0-9].\d-amd64-unsigned.(amd64).deb
+
+  - name: linux6
+    # Debian 12 (bookworm): 6.1.x
+    folder_patterns:
+      - ^linux$
+      - ^6\.\d+\.\d+
+    file_patterns:
+      - .linux-image.[0-9].\d-amd64-unsigned.(amd64).deb

@@ -1,9 +1,13 @@
 #!/bin/bash
-# Download Ubuntu mainline kernel vmlinuz from kernel.ubuntu.com/mainline
+# Standalone: download Ubuntu kernel vmlinuz from archive.ubuntu.com
 #
-# Accepts kernel version as listed by fetch_kernel_list.sh (e.g. 5.15.45).
-# kernels.list format: ubuntu:mainline:5.15.45
-# Fetches: kernel.ubuntu.com/mainline/v<VERSION>/amd64/linux-image-*-generic*.deb
+# NOTE: The main pipeline uses sync_kernels.sh + crawl.py instead.
+# This script is a manual utility for downloading a single kernel.
+#
+# Usage: $0 <version> <output_dir>
+# Example: $0 5.4.0-195-generic ./kernels/ubuntu-focal-5.4.0-195-generic
+#
+# kernels.list format: ubuntu:focal:5.4.0-195-generic
 set -uo pipefail
 
 VERSION="${1:-}"
@@ -13,10 +17,8 @@ if [[ -z "$VERSION" ]] || [[ -z "$OUTPUT_DIR" ]]; then
     echo "Usage: $0 <version> <output_dir>"
     echo ""
     echo "Examples:"
-    echo "  $0 5.15.45  ./kernels/ubuntu-mainline-5.15.45"
-    echo "  $0 4.19.316 ./kernels/ubuntu-mainline-4.19.316"
-    echo ""
-    echo "  Run ./fetch_kernel_list.sh --distro ubuntu --dry-run to list available versions."
+    echo "  $0 5.4.0-195-generic  ./kernels/ubuntu-focal-5.4.0-195-generic"
+    echo "  $0 5.15.0-119-generic ./kernels/ubuntu-jammy-5.15.0-119-generic"
     exit 1
 fi
 
@@ -24,78 +26,45 @@ mkdir -p "$OUTPUT_DIR"
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-UBUNTU_URL="https://kernel.ubuntu.com/mainline/v${VERSION}/"
-echo "Fetching index from $UBUNTU_URL"
+BASE_URL="https://archive.ubuntu.com/ubuntu/pool/main/l/linux/"
+echo "Fetching index from $BASE_URL"
 
-INDEX=$(curl -sf --max-time 20 "$UBUNTU_URL" 2>/dev/null || true)
+INDEX=$(curl -sf --max-time 20 "$BASE_URL" 2>/dev/null || true)
 if [[ -z "$INDEX" ]]; then
-    echo "✗ Cannot reach $UBUNTU_URL"
-    echo ""
-    echo "  Available nearby versions:"
-    curl -sf --max-time 15 "https://kernel.ubuntu.com/mainline/" 2>/dev/null \
-        | grep -oE '"v[0-9]+\.[0-9]+\.[0-9]+/"' | tr -d '"' | sed 's|^v||; s|/$||' \
-        | grep "^${VERSION%%.*}\." | sort -V | tail -10 || true
+    echo "✗ Cannot reach $BASE_URL"
     exit 1
 fi
 
-# Find linux-image deb for generic amd64 (unsigned preferred, then signed)
+# Match: linux-image-{VERSION}_..._amd64.deb or linux-image-unsigned-{VERSION}_..._amd64.deb
 DEB=$(printf '%s\n' "$INDEX" \
-    | grep -oE '(amd64/)?linux-image-unsigned[^"]*generic[^"]*amd64\.deb' \
-    | grep -v "dbg\|lowlatency" | head -1)
-
-[[ -z "$DEB" ]] && DEB=$(printf '%s\n' "$INDEX" \
-    | grep -oE '(amd64/)?linux-image-[^"]*generic[^"]*amd64\.deb' \
-    | grep -v "dbg\|lowlatency" | head -1)
+    | grep -oE 'linux-image-(unsigned-)?'"${VERSION//./\\.}"'[^"]*_amd64\.deb' \
+    | head -1)
 
 if [[ -z "$DEB" ]]; then
     echo "✗ Cannot find linux-image deb for version $VERSION"
-    echo "  Available files:"
-    printf '%s\n' "$INDEX" | grep -oE '[a-zA-Z0-9._/-]*linux-image[^"]*\.deb' | head -20 || true
+    echo "  Try: curl -s '$BASE_URL' | grep -o 'linux-image[^\"]*amd64.deb' | grep '$VERSION'"
     exit 1
 fi
 
-# Ensure amd64/ prefix
-[[ "$DEB" != amd64/* ]] && DEB="amd64/$DEB"
-
 echo "Downloading $DEB ..."
-if command -v curl &>/dev/null; then
-    curl -L --progress-bar --max-time 300 --retry 3 \
-         -o "$TEMP_DIR/kernel.deb" "${UBUNTU_URL}${DEB}"
-else
-    wget --timeout=300 --tries=3 -O "$TEMP_DIR/kernel.deb" "${UBUNTU_URL}${DEB}"
-fi
+curl -L --progress-bar --max-time 300 --retry 3 \
+     -o "$TEMP_DIR/kernel.deb" "${BASE_URL}${DEB}"
 
 if [[ ! -s "$TEMP_DIR/kernel.deb" ]]; then
     echo "✗ Download failed or file empty"
-    echo "  URL: ${UBUNTU_URL}${DEB}"
     exit 1
 fi
 
-# Extract vmlinuz from .deb
 cd "$TEMP_DIR"
-if ! ar x kernel.deb 2>/dev/null; then
-    echo "✗ Failed to extract .deb (ar command failed)"
-    exit 1
-fi
+ar x kernel.deb 2>/dev/null || { echo "✗ ar x failed"; exit 1; }
 
 DATA_TAR=$(ls data.tar* 2>/dev/null | head -1)
-if [[ -z "$DATA_TAR" ]]; then
-    echo "✗ Cannot find data.tar inside .deb"
-    ls -la "$TEMP_DIR" | head -10
-    exit 1
-fi
+[[ -z "$DATA_TAR" ]] && { echo "✗ data.tar not found in .deb"; exit 1; }
 
-if ! tar -xf "$DATA_TAR" --wildcards "*/boot/vmlinuz*" 2>/dev/null; then
-    # Some older debs have a different layout
-    tar -tf "$DATA_TAR" | grep "boot/vmlinuz" | head -1 \
-        | xargs -I {} tar -xf "$DATA_TAR" {} 2>/dev/null || true
-fi
+tar -xf "$DATA_TAR" --wildcards "*/boot/vmlinuz*" 2>/dev/null || true
 
 VMLINUZ=$(find "$TEMP_DIR" -name "vmlinuz*" -type f 2>/dev/null | head -1)
-if [[ -z "$VMLINUZ" ]]; then
-    echo "✗ vmlinuz not found inside .deb"
-    exit 1
-fi
+[[ -z "$VMLINUZ" ]] && { echo "✗ vmlinuz not found inside .deb"; exit 1; }
 
 cp "$VMLINUZ" "$OUTPUT_DIR/vmlinuz"
 echo "✓ vmlinuz → $OUTPUT_DIR/vmlinuz  ($(du -sh "$OUTPUT_DIR/vmlinuz" | cut -f1))"

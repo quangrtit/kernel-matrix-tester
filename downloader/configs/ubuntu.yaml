@@ -1,0 +1,18 @@
+title: Ubuntu kernel images (vmlinuz) — official Ubuntu archive
+
+start_url: https://archive.ubuntu.com/ubuntu/pool/main/l/
+download_folder: vmlinuz-ubuntu
+group: ubuntu
+
+jobs:
+  - name: linux-generic
+    folder_patterns:
+      - ^linux$
+    file_patterns:
+      - ^linux-image.(unsigned.)?[0-9].generic.(amd64).deb$
+
+  - name: linux-hwe
+    folder_patterns:
+      - ^linux-hwe.*$
+    file_patterns:
+      - ^linux-image.(unsigned.)?[0-9].generic.(amd64).deb$

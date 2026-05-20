@@ -1,14 +1,14 @@
 #!/bin/bash
-# Clean build artifacts for Falco Kernel Test Framework
+# Clean build artifacts
 #
 # Usage:
-#   ./clean.sh              — remove initramfs images + logs  (keep kernels/modules)
-#   ./clean.sh --all        — remove everything re-buildable/re-downloadable
-#   ./clean.sh --kernels    — also remove downloaded vmlinuz files
-#   ./clean.sh --modules    — also remove downloaded Falco drivers (.ko/.o)
-#   ./clean.sh --results    — remove only test logs/results
+#   ./clean.sh              — remove initramfs + results  (keep kernels/modules)
+#   ./clean.sh --results    — remove only test logs
+#   ./clean.sh --modules    — also remove Falco drivers (.ko/.o)
+#   ./clean.sh --kernels    — also remove downloaded vmlinuz
+#   ./clean.sh --all        — remove everything (kernels + modules + Falco binary)
 
-set -euo pipefail
+set -uo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -17,70 +17,67 @@ skip() { echo -e "  ${YELLOW}~${NC} $*"; }
 info() { echo -e "  ${CYAN}→${NC} $*"; }
 
 rm_if() {
-    local target="$1" label="$2"
-    if [[ -e "$target" ]]; then
-        rm -rf "$target"
-        ok "Removed: $label"
-    else
-        skip "Already gone: $label"
-    fi
+    if [[ -e "$1" ]]; then rm -rf "$1"; ok "Removed: $2"; else skip "Already gone: $2"; fi
 }
 
 rm_glob() {
-    local pattern="$1" label="$2"
-    local count
-    # Use find to handle empty glob safely
-    count=$(find $pattern -maxdepth 0 2>/dev/null | wc -l || echo 0)
-    if [[ "$count" -gt 0 ]]; then
-        rm -rf $pattern
-        ok "Removed $count × $label"
+    local files=(); while IFS= read -r f; do [[ -e "$f" ]] && files+=("$f"); done \
+        < <(find "$PROJECT_ROOT" -path "$1" 2>/dev/null)
+    if [[ ${#files[@]} -gt 0 ]]; then
+        rm -rf "${files[@]}"
+        ok "Removed ${#files[@]} × $2"
     else
-        skip "Nothing to remove: $label"
+        skip "Nothing to remove: $2"
     fi
 }
 
 MODE="default"
-[[ "${1:-}" == "--all"     ]] && MODE="all"
-[[ "${1:-}" == "--kernels" ]] && MODE="kernels"
-[[ "${1:-}" == "--modules" ]] && MODE="modules"
-[[ "${1:-}" == "--results" ]] && MODE="results"
+for arg in "$@"; do
+    case "$arg" in
+        --all)     MODE="all" ;;
+        --kernels) MODE="kernels" ;;
+        --modules) MODE="modules" ;;
+        --results) MODE="results" ;;
+    esac
+done
 
 echo ""
-echo -e "${BOLD}Falco Kernel Test — Clean${NC}  (mode: ${BOLD}${MODE}${NC})"
+echo -e "${BOLD}Clean${NC}  (mode: ${BOLD}${MODE}${NC})"
 echo ""
 
-# ── Always: initramfs images ──────────────────────────────────────────────────
+# Initramfs images (always, except --results only)
 if [[ "$MODE" != "results" ]]; then
-    info "Initramfs images"
-    rm_if  "$PROJECT_ROOT/initramfs-base.img"     "initramfs-base.img"
-    rm_glob "$PROJECT_ROOT/initramfs/*.img"        "initramfs/*.img"
+    info "Initramfs"
+    rm_if  "$PROJECT_ROOT/initramfs-base.img"  "initramfs-base.img"
+    rm_glob "*/initramfs/*.img"                 "initramfs/*.img"
 fi
 
-# ── Always (except --modules/--kernels only): results ────────────────────────
+# Test results / logs
 if [[ "$MODE" != "modules" ]] && [[ "$MODE" != "kernels" ]]; then
-    info "Test results / logs"
-    rm_glob "$PROJECT_ROOT/results/*.log"          "results/*.log"
+    info "Results / logs"
+    rm_glob "*/results/*.log"  "results/*.log"
+    rm_glob "*/results/*"      "results/* (dirs)"
 fi
 
-# ── --kernels / --all: downloaded vmlinuz ─────────────────────────────────────
+# Downloaded vmlinuz (--kernels or --all)
 if [[ "$MODE" == "kernels" ]] || [[ "$MODE" == "all" ]]; then
-    info "Downloaded kernels (vmlinuz)"
-    rm_glob "$PROJECT_ROOT/kernels/*/vmlinuz"      "kernels/*/vmlinuz"
+    info "Kernels (vmlinuz)"
+    rm_glob "*/kernels/*/vmlinuz"  "kernels/*/vmlinuz"
 fi
 
-# ── --modules / --all: downloaded drivers ─────────────────────────────────────
+# Falco drivers (--modules or --all)
 if [[ "$MODE" == "modules" ]] || [[ "$MODE" == "all" ]]; then
-    info "Downloaded Falco drivers (.ko / .o)"
-    rm_glob "$PROJECT_ROOT/modules/*/*.ko"         "modules/*/*.ko"
-    rm_glob "$PROJECT_ROOT/modules/*/*.o"          "modules/*/*.o"
+    info "Falco drivers"
+    rm_glob "*/modules/*/*.ko"  "modules/*/*.ko"
+    rm_glob "*/modules/*/*.o"   "modules/*/*.o"
 fi
 
-# ── --all: also remove Falco binary (will re-download on next setup) ──────────
+# Falco binary (--all only)
 if [[ "$MODE" == "all" ]]; then
     info "Falco binary"
-    rm_if  "$PROJECT_ROOT/falco/bin/falco"         "falco/bin/falco"
+    rm_if "$PROJECT_ROOT/falco/bin/falco"  "falco/bin/falco"
 fi
 
 echo ""
-echo -e "  ${GREEN}Done.${NC}  Run ${BOLD}./setup.sh${NC} to rebuild and re-run tests."
+echo -e "  ${GREEN}Done.${NC}  Run ${BOLD}./setup.sh${NC} to rebuild."
 echo ""

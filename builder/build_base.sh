@@ -185,22 +185,10 @@ for bpf in /lib/modules/*.o; do
     name=$(basename "$bpf")
     if [ "$KMAJ" -lt 4 ] || { [ "$KMAJ" -eq 4 ] && [ "$KMIN" -lt 14 ]; }; then
         echo "[BPF] $name SKIP kernel<4.14"
-        BPF_SKIP=$((BPF_SKIP + 1))
-    elif [ -x /bin/bpftool ]; then
-        log "bpftool load $name"
-        if bpftool prog load "$bpf" /sys/fs/bpf/probe_test 2>/tmp/bpf_err; then
-            echo "[BPF] $name PASS"
-            BPF_PASS=$((BPF_PASS + 1))
-            rm -f /sys/fs/bpf/probe_test
-        else
-            err=$(tr '\n' ' ' < /tmp/bpf_err | sed 's/  */ /g' | cut -c1-120)
-            echo "[BPF] $name FAIL $err"
-            BPF_FAIL=$((BPF_FAIL + 1))
-        fi
     else
-        echo "[BPF] $name SKIP no-bpftool"
-        BPF_SKIP=$((BPF_SKIP + 1))
+        echo "[BPF] $name SKIP tested-via-falco"
     fi
+    BPF_SKIP=$((BPF_SKIP + 1))
 done
 [ "$BPF_PASS" -eq 0 ] && [ "$BPF_FAIL" -eq 0 ] && [ "$BPF_SKIP" -eq 0 ] && echo "[BPF] (none)"
 
@@ -240,7 +228,15 @@ run_falco() {
         loaded_mod=$(lsmod 2>/dev/null | awk 'NR==2{print $1}')
         echo "[FALCO_STEP] [${tag}] kmod loaded: $loaded_mod"
     else
-        export FALCO_BPF_PROBE="$probe"
+        # Unload any lingering falco kmod before switching to eBPF engine
+        for _m in $(lsmod 2>/dev/null | awk 'NR>1{print $1}' | grep -i falco); do
+            rmmod "$_m" 2>/dev/null && echo "[FALCO_STEP] [${tag}] unloaded kmod: $_m" || true
+        done
+        # Falco resolves probe at $HOME/.falco/falco-bpf.o — pre-copy there
+        export HOME=/tmp
+        mkdir -p /tmp/.falco
+        cp "$probe" /tmp/.falco/falco-bpf.o
+        export FALCO_BPF_PROBE=/tmp/.falco/falco-bpf.o
         echo "[FALCO_STEP] [${tag}] ebpf probe set: $(basename $probe)"
     fi
 

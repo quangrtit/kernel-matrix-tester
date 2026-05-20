@@ -14,11 +14,29 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+DRIVER_CONFIG="$PROJECT_ROOT/config/driver_server.yaml"
 
-CLOUDFRONT_BASE="https://d20hasrqv82i0q.cloudfront.net"
-DRIVER_VERSION="9.1.0+driver"
-DRIVER_URL="${CLOUDFRONT_BASE}/driver/${DRIVER_VERSION//+/%2B}/x86_64"
-LISTING_URL="${CLOUDFRONT_BASE}/?prefix=driver/${DRIVER_VERSION//+/%2B}/x86_64"
+# Read driver server config (YAML field extraction via grep/sed — no deps needed)
+_yaml_field() {
+    local key="$1" file="$2"
+    grep -m1 "^${key}:" "$file" 2>/dev/null | sed 's/^[^:]*: *//; s/ *#.*//' | tr -d '"'"'"
+}
+
+DEFAULT_BASE="https://d20hasrqv82i0q.cloudfront.net"
+DEFAULT_LISTING="https://falco-distribution.s3-eu-west-1.amazonaws.com"
+DEFAULT_VER="9.1.0+driver"
+
+if [[ -f "$DRIVER_CONFIG" ]]; then
+    BASE_URL="$(_yaml_field base_url "$DRIVER_CONFIG")"
+    LISTING_BASE="$(_yaml_field listing_url "$DRIVER_CONFIG")"
+    DRIVER_VERSION="$(_yaml_field driver_version "$DRIVER_CONFIG")"
+fi
+BASE_URL="${DRIVER_BASE_URL:-${BASE_URL:-$DEFAULT_BASE}}"
+LISTING_BASE="${LISTING_BASE:-$DEFAULT_LISTING}"
+DRIVER_VERSION="${DRIVER_VERSION:-$DEFAULT_VER}"
+
+DRIVER_URL="${BASE_URL}/driver/${DRIVER_VERSION//+/%2B}/x86_64"
+LISTING_URL="${LISTING_BASE}/?prefix=driver/${DRIVER_VERSION//+/%2B}/x86_64"
 
 KERNEL_NAME="${1:-}"
 UNAME_R="${2:-}"
@@ -52,7 +70,7 @@ mkdir -p "$OUT_DIR"
 # Determined empirically from the CloudFront listing.
 declare -A DISTRO_TAGS
 DISTRO_TAGS=(
-    [ubuntu]="ubuntu"
+    [ubuntu]="ubuntu-generic"
     [debian]="debian"
     [centos]="centos"
     [rocky]="rocky"
@@ -140,8 +158,8 @@ O_FOUND=0
 for tag in "${FALCO_TAGS[@]}"; do
     if [[ $KO_FOUND -eq 0 ]]; then
         info "Searching .ko  tag=falco_${tag}_${UNAME_R}..."
-        result=$(search_driver "$tag" "ko" 2>/dev/null) || \
-        result=$(search_via_listing "$tag" "ko" 2>/dev/null) || true
+        result=$(search_via_listing "$tag" "ko" 2>/dev/null) || \
+        result=$(search_driver "$tag" "ko" 2>/dev/null) || true
         if [[ -n "$result" ]]; then
             url=$(echo "$result" | awk '{print $1}')
             fname=$(echo "$result" | awk '{print $2}')
@@ -160,8 +178,8 @@ for tag in "${FALCO_TAGS[@]}"; do
         fi
 
         info "Searching .o   tag=falco_${tag}_${UNAME_R}..."
-        result=$(search_driver "$tag" "o" 2>/dev/null) || \
-        result=$(search_via_listing "$tag" "o" 2>/dev/null) || true
+        result=$(search_via_listing "$tag" "o" 2>/dev/null) || \
+        result=$(search_driver "$tag" "o" 2>/dev/null) || true
         if [[ -n "$result" ]]; then
             url=$(echo "$result" | awk '{print $1}')
             fname=$(echo "$result" | awk '{print $2}')

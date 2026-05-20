@@ -35,7 +35,15 @@ trap "rm -rf $WORK_DIR" EXIT
 # Unpack base initramfs (gzip compressed)
 mkdir -p "$WORK_DIR/rootfs"
 cd "$WORK_DIR/rootfs"
-zcat "$BASE_IMG" | cpio -id --quiet 2>/dev/null || true
+if ! zcat "$BASE_IMG" | cpio -id --quiet 2>&1; then
+    echo "✗ Failed to unpack base initramfs: $BASE_IMG"
+    exit 1
+fi
+if [[ ! -x "$WORK_DIR/rootfs/init" ]]; then
+    echo "✗ Base initramfs is corrupt or incomplete — /init missing after extraction"
+    echo "  Run: ./builder/build_base.sh"
+    exit 1
+fi
 
 # Inject kernel-specific modules if available
 mkdir -p lib/modules
