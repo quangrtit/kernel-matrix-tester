@@ -1,17 +1,15 @@
-title: Rocky Linux kernel images (vmlinuz)
+title: Rocky Linux kernel images
+base_url: https://dl.rockylinux.org/vault/rocky/
 
-start_url: https://dl.rockylinux.org/vault/rocky/
-download_folder: vmlinuz-rocky
-group: rocky
+skip_pattern: (debug|modules-core|devel|headers|tools|bpftool|cross|perf|abi)
 
 # kernel-core contains vmlinuz for Rocky 8 and 9
-file_patterns:
-  - ^kernel-core-(?!6|7|8|9|debuginfo).*\.x86_64\.rpm$
+file_pattern: ^kernel-core-[2-5]\.\d+\.\d+.*\.x86_64\.rpm$
 
 jobs:
   - name: rocky8-old
-    # 8.3 / 8.4 — Packages/ directly (no k/ subfolder)
-    folder_patterns:
+    # 8.0–8.4: Packages/ directly, no k/ subfolder
+    dir_patterns:
       - ^8\.[0-4]
       - .*
       - ^x86_64$
@@ -19,8 +17,8 @@ jobs:
       - ^Packages$
 
   - name: rocky8-new
-    # 8.5+ — Packages/k/ subfolder added
-    folder_patterns:
+    # 8.5+: Packages/k/ subfolder added
+    dir_patterns:
       - ^8\.[5-9]
       - .*
       - ^x86_64$
@@ -29,7 +27,7 @@ jobs:
       - ^k$
 
   - name: rocky9
-    folder_patterns:
+    dir_patterns:
       - ^9\.
       - .*
       - ^x86_64$

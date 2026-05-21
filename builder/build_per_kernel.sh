@@ -22,6 +22,12 @@ if [[ ! -f "$BASE_IMG" ]]; then
     exit 1
 fi
 
+# Fall back to a project-local tmpdir if /tmp is missing or not writable
+if [[ ! -d /tmp ]] || [[ ! -w /tmp ]]; then
+    export TMPDIR="$PROJECT_ROOT/.tmp"
+    mkdir -p "$TMPDIR"
+fi
+
 MODULES_DIR="$PROJECT_ROOT/modules/$KERNEL_NAME"
 OUTPUT_IMG="$PROJECT_ROOT/initramfs/${KERNEL_NAME}.img"
 mkdir -p "$(dirname "$OUTPUT_IMG")"

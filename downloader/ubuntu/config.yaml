@@ -1,0 +1,8 @@
+title: Ubuntu kernel images
+base_url: https://archive.ubuntu.com/ubuntu/pool/main/l/
+
+# Source package directory names to enter (regex matched)
+source_pattern: ^linux(-hwe.*)?$
+
+# .deb file pattern — major 2–5, generic flavour, amd64 only
+file_pattern: ^linux-image-(unsigned-)?[2-5]\.\d+\.\d+[-\w]*-generic_[^_]+_amd64\.deb$

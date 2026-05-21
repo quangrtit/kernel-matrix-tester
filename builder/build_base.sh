@@ -31,6 +31,12 @@ for cmd in busybox cpio gzip; do
 done
 ok "busybox, cpio, gzip found"
 
+# Fall back to a project-local tmpdir if /tmp is missing or not writable
+if [[ ! -d /tmp ]] || [[ ! -w /tmp ]]; then
+    export TMPDIR="$PROJECT_ROOT/.tmp"
+    mkdir -p "$TMPDIR"
+fi
+
 # ── Working directory ──────────────────────────────────────────────────────
 WORK_DIR=$(mktemp -d)
 trap "rm -rf $WORK_DIR" EXIT

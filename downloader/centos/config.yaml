@@ -1,0 +1,32 @@
+title: CentOS kernel images
+base_url: https://vault.centos.org/
+
+# Packages matching this pattern are always excluded
+skip_pattern: (debug|modules-core|devel|headers|tools|bpftool|cross|perf|abi)
+
+jobs:
+  - name: el6
+    base_url: https://vault.centos.org/centos/
+    dir_patterns:
+      - ^6\.
+      - ^(os|updates)$
+      - ^x86_64$
+      - ^Packages$
+    file_pattern: ^kernel-[2-5]\.\d+\.\d+.*\.x86_64\.rpm$
+
+  - name: el7
+    dir_patterns:
+      - ^7\.
+      - ^(os|updates)$
+      - ^x86_64$
+      - ^Packages$
+    file_pattern: ^kernel-[2-5]\.\d+\.\d+.*\.x86_64\.rpm$
+
+  - name: el8
+    dir_patterns:
+      - ^8\.
+      - ^BaseOS$
+      - ^x86_64$
+      - ^os$
+      - ^Packages$
+    file_pattern: ^kernel-core-[2-5]\.\d+\.\d+.*\.x86_64\.rpm$

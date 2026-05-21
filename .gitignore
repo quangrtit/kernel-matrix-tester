@@ -15,6 +15,7 @@ vmlinuz
 *.tmp
 *.swp
 *~
+/.tmp/
 
 # Development notes and drafts
 Claude.md
@@ -23,3 +24,6 @@ IMPLEMENTATION.md
 # Keep directory structure but ignore content
 !.gitkeep
 docx.md
+/downloader/__pycache__
+.tmp
+.claude

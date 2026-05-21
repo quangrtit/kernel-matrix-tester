@@ -1,0 +1,10 @@
+# Enabled distros for crawler_all.py
+# Comment out a distro to disable it
+enabled:
+  - ubuntu
+  - centos
+  - almalinux
+  - rocky
+  - debian
+  - oracle
+  # - redhat   # requires offline_token in redhat/config.yaml

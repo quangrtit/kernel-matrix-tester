@@ -1,0 +1,22 @@
+title: Oracle Linux kernel images
+base_url: https://yum.oracle.com/
+
+# Matched against the full URL (Oracle repos embed getPackage/ in the path)
+file_pattern: getPackage/kernel(?:-core)?(?!.*(devel|debug|header|module|tool|lib|doc|firmware|cross|abi|container))[^/]*-[2-5]\.\d+.*x86_64.*\.rpm$
+
+jobs:
+  - name: OL6
+    start_url: https://yum.oracle.com/oracle-linux-6.html
+    link_pattern: /repo/OracleLinux/OL6/.*/x86_64/
+
+  - name: OL7
+    start_url: https://yum.oracle.com/oracle-linux-7.html
+    link_pattern: /repo/OracleLinux/OL7/.*/x86_64/
+
+  - name: OL8
+    start_url: https://yum.oracle.com/oracle-linux-8.html
+    link_pattern: /repo/OracleLinux/OL8/.*/x86_64/
+
+  - name: OL9
+    start_url: https://yum.oracle.com/oracle-linux-9.html
+    link_pattern: /repo/OracleLinux/OL9/.*/x86_64/

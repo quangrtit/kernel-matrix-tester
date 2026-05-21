@@ -12,12 +12,14 @@
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CRAWLER="$PROJECT_ROOT/downloader/crawl.py"
-CONFIGS_DIR="$PROJECT_ROOT/downloader/configs"
+DOWNLOADER_DIR="$PROJECT_ROOT/downloader"
 KERNELS_DIR="$PROJECT_ROOT/kernels"
 KERNELS_LIST="$PROJECT_ROOT/config/kernels.list"
 
 DRY_RUN=0
+TEST_MODE="${TEST_MODE:-0}"                 # 1 = limit to MAX_PER_MAJOR per distro×major group
+MAX_PER_MAJOR="${MAX_PER_MAJOR:-20}"        # kernels to keep per group in TEST_MODE
+MAX_KERNEL_MAJOR="${MAX_KERNEL_MAJOR:-5}"   # skip kernels with major version > this
 SELECTED=()
 for arg in "$@"; do
     case "$arg" in
@@ -27,7 +29,13 @@ for arg in "$@"; do
     esac
 done
 
-ALL_DISTROS=(centos almalinux rocky ubuntu debian)
+# Fall back to a project-local tmpdir if /tmp is missing or not writable
+if [[ ! -d /tmp ]] || [[ ! -w /tmp ]]; then
+    export TMPDIR="$PROJECT_ROOT/.tmp"
+    mkdir -p "$TMPDIR"
+fi
+
+ALL_DISTROS=(centos almalinux rocky ubuntu debian oracle redhat)
 [[ ${#SELECTED[@]} -gt 0 ]] && RUN_DISTROS=("${SELECTED[@]}") || RUN_DISTROS=("${ALL_DISTROS[@]}")
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -124,6 +132,26 @@ parse_entry() {
                 6.1)  release="bookworm" ;;
                 *)    release="debian"   ;;
             esac ;;
+        oracle)
+            # Handles: kernel-*, kernel-core-*, kernel-uek-*, kernel-uek-core-*
+            if [[ "$f" == kernel-uek-core-* ]]; then
+                version="${f#kernel-uek-core-}"; version="${version%.x86_64.rpm}"
+            elif [[ "$f" == kernel-uek-* ]]; then
+                version="${f#kernel-uek-}"; version="${version%.x86_64.rpm}"
+            elif [[ "$f" == kernel-core-* ]]; then
+                version="${f#kernel-core-}"; version="${version%.x86_64.rpm}"
+            else
+                version="${f#kernel-}"; version="${version%.x86_64.rpm}"
+            fi
+            local ol_major; ol_major=$(echo "$version" | grep -oP '\.el\K[0-9]+' || true)
+            release="${ol_major:+OL${ol_major}}"; release="${release:-oracle}" ;;
+        redhat)
+            # CDN URLs may carry query params — strip before basename
+            local clean_url="${url%%\?*}"
+            f=$(basename "$clean_url")
+            version="${f#kernel-}"; version="${version%.x86_64.rpm}"
+            local rh_major; rh_major=$(echo "$version" | grep -oP '\.el\K[0-9]+' || true)
+            release="${rh_major:+rhel${rh_major}}"; release="${release:-rhel}" ;;
         *) return 1 ;;
     esac
 
@@ -149,6 +177,10 @@ process_url() {
     local version release
     version=$(cut -d: -f3 <<< "$entry")
     release=$(cut -d: -f2 <<< "$entry")
+    local kmaj; kmaj=$(cut -d. -f1 <<< "$version")
+    if [[ -n "${MAX_KERNEL_MAJOR:-}" ]] && [[ "$kmaj" =~ ^[0-9]+$ ]] && [[ "$kmaj" -gt "$MAX_KERNEL_MAJOR" ]]; then
+        return 0
+    fi
     local kname="${distro}-${release}-${version}"
     local dest="$KERNELS_DIR/${kname}/vmlinuz"
 
@@ -165,8 +197,10 @@ process_url() {
 
     info "↓ $kname ..."
 
-    local tmp_pkg; tmp_pkg=$(mktemp)
-    trap "rm -f '$tmp_pkg'" RETURN
+    local tmp_pkg tmp_vmlinuz
+    tmp_pkg=$(mktemp)
+    tmp_vmlinuz=$(mktemp)
+    trap "rm -f '$tmp_pkg' '$tmp_vmlinuz'" RETURN
 
     if ! curl -fL --max-time 600 --retry 3 --retry-delay 5 \
             --speed-limit 1024 --speed-time 60 \
@@ -175,19 +209,20 @@ process_url() {
         return 1
     fi
 
-    mkdir -p "$(dirname "$dest")"
     local f; f=$(basename "$url")
     if [[ "$f" == *.rpm ]]; then
-        extract_rpm "$tmp_pkg" "$dest"
+        extract_rpm "$tmp_pkg" "$tmp_vmlinuz"
     else
-        extract_deb "$tmp_pkg" "$dest"
+        extract_deb "$tmp_pkg" "$tmp_vmlinuz"
     fi
 
-    if [[ ! -s "$dest" ]]; then
+    if [[ ! -s "$tmp_vmlinuz" ]]; then
         fail "vmlinuz extract failed: $f"
-        rm -f "$dest"
         return 1
     fi
+
+    mkdir -p "$(dirname "$dest")"
+    mv "$tmp_vmlinuz" "$dest"
 
     ok "$kname  ($(du -sh "$dest" | cut -f1))"
     register "$entry"
@@ -202,20 +237,37 @@ if [[ ! -f "$KERNELS_LIST" ]]; then
 fi
 
 echo ""
-echo -e "${BOLD}Sync kernel images${NC}  [${RUN_DISTROS[*]}]$([[ $DRY_RUN -eq 1 ]] && echo "  (dry-run)")"
+_mode_tags=""
+[[ $DRY_RUN -eq 1 ]]  && _mode_tags+="  (dry-run)"
+[[ $TEST_MODE -eq 1 ]] && _mode_tags+="  (test-mode: max ${MAX_PER_MAJOR} per major)"
+echo -e "${BOLD}Sync kernel images${NC}  [${RUN_DISTROS[*]}]${_mode_tags}"
 echo ""
 
 ERRORS=0
 for distro in "${RUN_DISTROS[@]}"; do
-    cfg="$CONFIGS_DIR/${distro}.yaml"
-    if [[ ! -f "$cfg" ]]; then
-        fail "$distro — config not found: $cfg"; continue
+    crawler="$DOWNLOADER_DIR/${distro}/crawler.py"
+    if [[ ! -f "$crawler" ]]; then
+        fail "$distro — crawler not found: $crawler"; continue
     fi
 
     echo -e "${BOLD}━━━ ${distro} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    # RedHat uses its own producer-consumer pipeline (CDN auth + async resolve+download)
+    if [[ "$distro" == "redhat" ]]; then
+        dry_flag=(); [[ $DRY_RUN -eq 1 ]] && dry_flag=(--dry-run)
+        python3 "$crawler" --download \
+            --kernels-dir "$KERNELS_DIR" \
+            --kernels-list "$KERNELS_LIST" \
+            --max-major "${MAX_KERNEL_MAJOR}" \
+            "${dry_flag[@]}" \
+            || ERRORS=$((ERRORS + 1))
+        echo ""
+        continue
+    fi
+
     info "Crawling ..."
 
-    mapfile -t urls < <(python3 "$CRAWLER" "$cfg" --list --verbose | sort -u)
+    mapfile -t urls < <(python3 "$crawler" --list --verbose | sort -u)
 
     if [[ ${#urls[@]} -eq 0 ]]; then
         fail "No packages found (repo unreachable?)"
@@ -223,7 +275,13 @@ for distro in "${RUN_DISTROS[@]}"; do
         continue
     fi
 
-    echo -e "  found ${#urls[@]} packages"
+    if [[ $TEST_MODE -eq 1 ]]; then
+        mapfile -t urls < <(printf '%s\n' "${urls[@]}" | \
+            python3 "$DOWNLOADER_DIR/filter_urls.py" --distro "$distro" --max "$MAX_PER_MAJOR")
+        echo -e "  found ${#urls[@]} packages (test mode, max ${MAX_PER_MAJOR} per major)"
+    else
+        echo -e "  found ${#urls[@]} packages"
+    fi
     echo ""
 
     for url in "${urls[@]}"; do

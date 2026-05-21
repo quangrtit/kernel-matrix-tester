@@ -1,0 +1,25 @@
+title: Debian kernel images — snapshot.debian.org
+base_url: https://snapshot.debian.org/package/
+
+# .deb file pattern — major 2–5, amd64 only
+file_pattern: ^linux-image-[2-5]\.\d+\.\d+[-\w]*-amd64(?:-unsigned)?_[^_]+_amd64\.deb$
+
+jobs:
+  - name: squeeze
+    # Debian 6 (2.6.32) — pinned to final release, no version dir navigation needed
+    start_url: https://snapshot.debian.org/package/linux-2.6/2.6.32-48squeeze20/
+
+  - name: wheezy
+    # Debian 7: linux source, 3.2.x
+    start_url: https://snapshot.debian.org/package/linux/
+    version_pattern: ^3\.\d+\.\d+
+
+  - name: stretch_buster
+    # Debian 9 (4.9.x) and Debian 10 (4.19.x)
+    start_url: https://snapshot.debian.org/package/linux/
+    version_pattern: ^4\.\d+\.\d+
+
+  - name: bullseye
+    # Debian 11: 5.10.x
+    start_url: https://snapshot.debian.org/package/linux/
+    version_pattern: ^5\.\d+\.\d+

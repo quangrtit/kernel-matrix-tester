@@ -1,0 +1,24 @@
+title: AlmaLinux kernel images
+base_url: https://vault.almalinux.org/
+
+skip_pattern: (debug|modules-core|devel|headers|tools|bpftool|cross|perf|abi)
+
+# kernel-core contains vmlinuz for both el8 and el9
+file_pattern: ^kernel-core-[2-5]\.\d+\.\d+.*\.x86_64\.rpm$
+
+jobs:
+  - name: al8
+    dir_patterns:
+      - ^8\.
+      - .*
+      - ^x86_64$
+      - ^os$
+      - ^Packages$
+
+  - name: al9
+    dir_patterns:
+      - ^9\.
+      - .*
+      - ^x86_64$
+      - ^os$
+      - ^Packages$
