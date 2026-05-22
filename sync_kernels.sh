@@ -134,7 +134,9 @@ parse_entry() {
             esac ;;
         oracle)
             # Handles: kernel-*, kernel-core-*, kernel-uek-*, kernel-uek-core-*
-            if [[ "$f" == kernel-uek-core-* ]]; then
+            # kernel-uki-* are Unified Kernel Images — skip them
+            if [[ "$f" == kernel-uki-* ]]; then return 0
+            elif [[ "$f" == kernel-uek-core-* ]]; then
                 version="${f#kernel-uek-core-}"; version="${version%.x86_64.rpm}"
             elif [[ "$f" == kernel-uek-* ]]; then
                 version="${f#kernel-uek-}"; version="${version%.x86_64.rpm}"

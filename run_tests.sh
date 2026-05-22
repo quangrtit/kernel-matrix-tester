@@ -425,6 +425,7 @@ main() {
         [[ -z "${distro// }" ]] && continue
         [[ -n "${DISTRO:-}" ]] && [[ "$distro" != "$DISTRO" ]] && continue
         [[ -n "${KERNEL_FILTER:-}" ]] && [[ "$kernel_version" != *"$KERNEL_FILTER"* ]] && continue
+        [[ "$kernel_version" =~ ^[0-9] ]] || continue
         local kmaj; kmaj="$(cut -d. -f1 <<< "$kernel_version")"
         [[ -n "${MAX_KERNEL_MAJOR:-}" ]] && [[ "$kmaj" -gt "${MAX_KERNEL_MAJOR}" ]] && continue
 

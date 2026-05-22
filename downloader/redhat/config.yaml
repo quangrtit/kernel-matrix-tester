@@ -8,17 +8,17 @@ architectures:
 package_name: kernel
 
 jobs:
-  - name: RHEL6
-    content_sets:
-      - rhel-6-server-rpms
-      - rhel-6-server-optional-rpms
-    version_pattern: ^2\.6\.32-.*\.el6
+  # - name: RHEL6
+  #   content_sets:
+  #     - rhel-6-server-rpms
+  #     - rhel-6-server-optional-rpms
+  #   version_pattern: ^2\.6\.32-.*\.el6
 
-  - name: RHEL7
-    content_sets:
-      - rhel-7-server-rpms
-      - rhel-7-server-optional-rpms
-    version_pattern: ^3\.10\.0-.*\.el7
+  # - name: RHEL7
+  #   content_sets:
+  #     - rhel-7-server-rpms
+  #     - rhel-7-server-optional-rpms
+  #   version_pattern: ^3\.10\.0-.*\.el7
 
   - name: RHEL8
     content_sets:

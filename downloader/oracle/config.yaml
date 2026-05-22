@@ -2,7 +2,7 @@ title: Oracle Linux kernel images
 base_url: https://yum.oracle.com/
 
 # Matched against the full URL (Oracle repos embed getPackage/ in the path)
-file_pattern: getPackage/kernel(?:-core)?(?!.*(devel|debug|header|module|tool|lib|doc|firmware|cross|abi|container))[^/]*-[2-5]\.\d+.*x86_64.*\.rpm$
+file_pattern: getPackage/kernel(?:-uek|-core|-uek-core)?(?!.*(devel|debug|header|module|tool|lib|doc|firmware|cross|abi|container|uki))[^/]*-[2-5]\.\d+.*x86_64.*\.rpm$
 
 jobs:
   - name: OL6

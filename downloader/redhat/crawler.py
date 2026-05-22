@@ -100,22 +100,27 @@ def _hdrs(token: str) -> dict:
 # ── Package list fetch ────────────────────────────────────────────────────────
 
 def _fetch_packages(tok_mgr: _TokMgr, content_set: str, arch: str,
-                    pkg_name: str, verbose: bool, workers: int = 8) -> list[dict]:
-    """Fetch all pages concurrently; refresh token on 401."""
+                    pkg_name: str, verbose: bool, workers: int = 3) -> list[dict]:
+    """Fetch all pages concurrently; refresh token on 401, backoff on 429."""
     url = f"{API_BASE}/packages/cset/{content_set}/arch/{arch}"
 
     def _one_page(offset: int) -> tuple[int, list[dict], bool]:
-        for attempt in range(2):
+        for attempt in range(8):
             sess, tok = tok_mgr.get()
             resp = sess.get(url, headers=_hdrs(tok),
                             params={"limit": 100, "offset": offset}, timeout=60)
             if resp.status_code == 401 and attempt == 0:
                 tok_mgr.refresh(tok)
                 continue
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("Retry-After", 2 ** attempt))
+                time.sleep(min(wait, 120))
+                continue
             resp.raise_for_status()
             body = resp.json().get("body", [])
             return offset, [p for p in body if p.get("name") == pkg_name], len(body) < 100
-        return offset, [], True
+        raise RuntimeError(f"gave up after repeated 429 at offset {offset}")
+
 
     all_pkgs: list[dict] = []
     offset = 0
