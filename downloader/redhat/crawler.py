@@ -161,20 +161,21 @@ def _build_package_list(cfg: dict, tok_mgr: _TokMgr, verbose: bool) -> list[dict
         print(f"  [cache] {len(cached)} packages (TTL {CACHE_TTL_DAYS}d)", flush=True)
         return cached
 
-    pkg_name      = cfg.get("package_name", "kernel")
+    default_pkg_name = cfg.get("package_name", "kernel")  # ← ĐỔI tên biến
     architectures = cfg.get("architectures", ["x86_64"])
     seen: set[str] = set()
     packages: list[dict] = []
 
     for job in cfg["jobs"]:
         job_name = job.get("name", "job")
+        pkg_name = job.get("package_name", default_pkg_name)  # ← THÊM DÒNG NÀY
         ver_re   = re.compile(job["version_pattern"])
         print(f"  [{job_name}] fetching from RHSM API ...", flush=True)
         for cs in job["content_sets"]:
             for arch in architectures:
                 if verbose:
                     print(f"    {cs}/{arch}", file=sys.stderr)
-                raw = _fetch_packages(tok_mgr, cs, arch, pkg_name, verbose)
+                raw = _fetch_packages(tok_mgr, cs, arch, pkg_name, verbose)  # pkg_name giờ per-job
                 for p in raw:
                     ver  = f"{p.get('version', '')}-{p.get('release', '')}"
                     chk  = p.get("checksum", "")
@@ -184,7 +185,7 @@ def _build_package_list(cfg: dict, tok_mgr: _TokMgr, verbose: bool) -> list[dict
                     epoch   = str(p.get("epoch", "0"))
                     ver_rel = f"{p['version']}-{p['release']}"
                     a       = p.get("arch", "x86_64")
-                    fname   = (f"{pkg_name}-{epoch}:{ver_rel}.{a}.rpm"
+                    fname   = (f"{pkg_name}-{epoch}:{ver_rel}.{a}.rpm"   # pkg_name per-job
                                if epoch != "0" else f"{pkg_name}-{ver_rel}.{a}.rpm")
                     packages.append({"checksum": chk, "filename": fname})
 
