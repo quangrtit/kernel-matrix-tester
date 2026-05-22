@@ -254,6 +254,7 @@ for distro in "${RUN_DISTROS[@]}"; do
 
     # RedHat uses its own producer-consumer pipeline (CDN auth + async resolve+download)
     if [[ "$distro" == "redhat" ]]; then
+        info "Authenticating with Red Hat SSO ..."
         dry_flag=(); [[ $DRY_RUN -eq 1 ]] && dry_flag=(--dry-run)
         python3 "$crawler" --download \
             --kernels-dir "$KERNELS_DIR" \

@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -46,7 +47,7 @@ _CACHE         = os.path.join(_HERE, ".pkg_cache.json")
 SSO_URL        = "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token"
 API_BASE       = "https://api.access.redhat.com/management/v1"
 CACHE_TTL_DAYS = 7
-CDN_WORKERS    = 8
+CDN_WORKERS    = 3   # keep low — Red Hat CDN rate-limits aggressive parallel requests
 DL_WORKERS     = 4
 
 
@@ -152,8 +153,7 @@ def _build_package_list(cfg: dict, tok_mgr: _TokMgr, verbose: bool) -> list[dict
     """Return cached or freshly-fetched package metadata list."""
     cached = _load_cache()
     if cached:
-        if verbose:
-            print(f"  [cache] {len(cached)} packages", file=sys.stderr)
+        print(f"  [cache] {len(cached)} packages (TTL {CACHE_TTL_DAYS}d)", flush=True)
         return cached
 
     pkg_name      = cfg.get("package_name", "kernel")
@@ -164,12 +164,11 @@ def _build_package_list(cfg: dict, tok_mgr: _TokMgr, verbose: bool) -> list[dict
     for job in cfg["jobs"]:
         job_name = job.get("name", "job")
         ver_re   = re.compile(job["version_pattern"])
-        if verbose:
-            print(f"  [{job_name}]", file=sys.stderr)
+        print(f"  [{job_name}] fetching from RHSM API ...", flush=True)
         for cs in job["content_sets"]:
             for arch in architectures:
                 if verbose:
-                    print(f"    fetching {cs}/{arch} ...", file=sys.stderr)
+                    print(f"    {cs}/{arch}", file=sys.stderr)
                 raw = _fetch_packages(tok_mgr, cs, arch, pkg_name, verbose)
                 for p in raw:
                     ver  = f"{p.get('version', '')}-{p.get('release', '')}"
@@ -184,6 +183,7 @@ def _build_package_list(cfg: dict, tok_mgr: _TokMgr, verbose: bool) -> list[dict
                                if epoch != "0" else f"{pkg_name}-{ver_rel}.{a}.rpm")
                     packages.append({"checksum": chk, "filename": fname})
 
+    print(f"  fetched {len(packages)} packages total — caching for {CACHE_TTL_DAYS} days", flush=True)
     _save_cache(packages)
     return packages
 
@@ -191,10 +191,14 @@ def _build_package_list(cfg: dict, tok_mgr: _TokMgr, verbose: bool) -> list[dict
 # ── CDN URL resolution ────────────────────────────────────────────────────────
 
 def _resolve_cdn(pkg: dict, tok_mgr: _TokMgr) -> str | None:
-    for attempt in range(2):
+    for attempt in range(6):
         sess, tok = tok_mgr.get()
         resp = sess.get(f"{API_BASE}/packages/{pkg['checksum']}/download",
                         headers=_hdrs(tok), timeout=60, allow_redirects=False)
+        if resp.status_code == 429:
+            wait = int(resp.headers.get("Retry-After", 2 ** attempt))
+            time.sleep(min(wait, 60))
+            continue
         if resp.status_code == 401 and attempt == 0:
             tok_mgr.refresh(tok)
             continue
@@ -203,6 +207,7 @@ def _resolve_cdn(pkg: dict, tok_mgr: _TokMgr) -> str | None:
             return None
         url = resp.json().get("body", {}).get("href", "")
         return url or None
+    print(f"  [warn] {pkg['filename']}: gave up after repeated 429", file=sys.stderr)
     return None
 
 
@@ -225,9 +230,12 @@ def _extract_vmlinuz(rpm_path: str, dest: str) -> bool:
         p2 = subprocess.Popen(["cpio", "-id", "--quiet", "--no-absolute-filenames"],
                                stdin=p1.stdout, cwd=tmpdir,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        p1.stdout.close()
-        p2.communicate(timeout=120)
-        p1.communicate()
+        p1.stdout.close()  # let p1 receive SIGPIPE if p2 exits early
+        try:
+            p2.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            p2.kill()
+        p1.wait()  # do NOT call communicate() — stdout is already closed
         for root, _, files in os.walk(tmpdir):
             for fn in sorted(files):
                 if fn.startswith("vmlinuz") and "rescue" not in fn and "debug" not in fn:
