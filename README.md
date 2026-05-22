@@ -1,262 +1,280 @@
 # Falco Kernel Matrix Tester
 
-Automated framework for testing Falco kernel modules (`.ko`) and eBPF probes (`.o`) across many kernel versions and Linux distributions. Uses QEMU direct kernel boot — no full disk image or bootloader required.
+> Automated testing of Falco kernel module (`.ko`) and eBPF probe (`.o`) across hundreds of kernel versions and distros using direct QEMU boot — no disk image or bootloader required.
 
 ---
 
-## How It Works
+## Problem
 
-```
-sync_kernels.sh  ──►  kernels/{kname}/vmlinuz
-                       config/kernels.list
-
-run_tests.sh  (per kernel in kernels.list):
-  1. Discover uname -r  (from vmlinuz binary or quick boot)
-  2. Download Falco drivers  ──►  modules/falco_{distro}_{kernel_version}_x86_64.ko/.o
-  3. Build per-kernel initramfs  ──►  initramfs/{kname}.img
-  4. Boot QEMU  (-kernel vmlinuz -initrd initramfs)
-  5. Run tests inside VM, collect results  ──►  results/{kname}.log
-                                                 results/cache.json
-```
+Falco must work across many kernel versions (2.x → 6.x) and many distros (CentOS, Ubuntu, Debian, AlmaLinux, Rocky, Oracle, RHEL). Manually verifying each kernel is not feasible. This framework automates the entire pipeline: download kernel → download driver → boot VM → record results.
 
 ---
 
-## Prerequisites
+## System Overview
 
-```bash
-apt-get install qemu-system-x86 curl cpio gzip busybox-static rpm2cpio python3-yaml binutils
+```
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │  STEP 1 — Collect kernels                                           │
+ │                                                                     │
+ │  sync_kernels.sh                                                    │
+ │  ┌──────────┐   crawl   ┌──────────────────┐  extract   ┌────────┐ │
+ │  │  distro  │ ────────► │  package repo    │ ─────────► │vmlinuz │ │
+ │  │  crawler │           │  (vault/archive) │            │  disk  │ │
+ │  └──────────┘           └──────────────────┘            └────────┘ │
+ │  centos / ubuntu / debian / almalinux / rocky / oracle / redhat     │
+ └─────────────────────────────────────────────────────────────────────┘
+                                │
+                                │  kernels/{distro}-{release}-{ver}/vmlinuz
+                                │  config/kernels.list
+                                ▼
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │  STEP 2 — Run tests (run_tests.sh)                   per kernel    │
+ │                                                                     │
+ │  kernels.list                                                       │
+ │      │                                                              │
+ │      ▼ [1] Discover uname -r                                        │
+ │      │     (read from vmlinuz binary or quick boot)                 │
+ │      │                                                              │
+ │      ▼ [2] Download Falco drivers                                   │
+ │      │     ┌─────────────────────┐   ┌──────────────────────────┐  │
+ │      │     │  Custom server      │ ► │  Falco CDN (fallback)    │  │
+ │      │     │  test_server/ :8080 │   │  CloudFront / S3         │  │
+ │      │     └─────────────────────┘   └──────────────────────────┘  │
+ │      │     → modules/falco_{distro}_{kver}_x86_64.{ko|o}           │
+ │      │                                                              │
+ │      ▼ [3] Build initramfs                                          │
+ │      │     base initramfs + Falco binary + driver → initramfs/     │
+ │      │                                                              │
+ │      ▼ [4] QEMU boot                                                │
+ │      │     -kernel vmlinuz  -initrd initramfs  -nographic           │
+ │      │                                                              │
+ │      ▼ [5] Collect results                                          │
+ │            results/{kname}.log  ·  results/cache.json              │
+ └─────────────────────────────────────────────────────────────────────┘
 ```
 
-| Tool | Purpose |
-|------|---------|
-| `qemu-system-x86_64` | VM boot |
-| `curl` | Downloads |
-| `cpio`, `gzip` | initramfs packing |
-| `busybox` | initramfs userland |
-| `rpm2cpio` | extract vmlinuz from RPM |
-| `ar` | extract vmlinuz from .deb |
-| `python3-yaml` | crawler config parsing |
-| `strings` (binutils) | fast uname -r discovery |
-| `/dev/kvm` | 2× faster boot (optional) |
+**Sample output for one kernel:**
+```
+[BOOT]       kernel booted OK
+[KO]  PASS   falco_probe.ko loaded
+[BPF] PASS   falco_probe.o  loaded  (kernel ≥ 4.14)
+[FALCO_KO]   PASS  engine=kmod  events=3
+RESULT: KO_PASS=1 KO_FAIL=0 BPF_PASS=1 BPF_FAIL=0
+ALL_DONE
+```
 
 ---
 
 ## Quick Start
 
 ```bash
-# Full pipeline (prereqs check → Falco binary → base initramfs → sync kernels → boot tests)
-./setup.sh
+apt-get install qemu-system-x86 curl cpio gzip busybox-static rpm2cpio python3-yaml binutils
 
-# Or step by step:
-./sync_kernels.sh          # 1. download vmlinuz for all distros
-./run_tests.sh             # 2. build initramfs + boot test each kernel
+./setup.sh        # full pipeline: prereqs → Falco binary → base initramfs → sync → test
 ```
 
 ---
 
-## Syncing Kernels (`sync_kernels.sh`)
+## Step-by-Step Guide
 
-Downloads vmlinuz from each distro's package repo, extracts it, and registers the entry in `config/kernels.list`. Kernels already on disk are skipped (cached).
+### 1. Sync kernel vmlinuz
 
 ```bash
 # All distros
 ./sync_kernels.sh
 
-# Specific distros only
-./sync_kernels.sh centos almalinux rocky
+# Specific distros
+./sync_kernels.sh centos ubuntu almalinux
 
-# Preview what would be downloaded (no actual download)
+# Dry run (no downloads)
 ./sync_kernels.sh --dry-run
-./sync_kernels.sh centos --dry-run
 ```
 
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAX_KERNEL_MAJOR` | `5` | Skip kernels with major version > this (e.g. skip 6.x) |
-| `TEST_MODE` | `0` | Set `1` to limit downloads to `MAX_PER_MAJOR` per group |
-| `MAX_PER_MAJOR` | `20` | Max kernels per (distro × major_version) in test mode |
+Limit the number of kernels downloaded (for quick testing):
 
 ```bash
-# Test mode: download at most 20 kernels per major version per distro
+# At most 20 kernels per (distro × major version)
 TEST_MODE=1 ./sync_kernels.sh
 
-# Test mode, custom limit
-TEST_MODE=1 MAX_PER_MAJOR=10 ./sync_kernels.sh centos
+TEST_MODE=1 MAX_PER_MAJOR=5 ./sync_kernels.sh centos
 
-# Allow kernel 6.x as well
+# Skip kernels 6.x and above (default MAX_KERNEL_MAJOR=5)
 MAX_KERNEL_MAJOR=6 ./sync_kernels.sh ubuntu
 ```
 
 ---
 
-## Running Tests (`run_tests.sh`)
+### 2. Prepare Falco drivers
 
-For each kernel in `config/kernels.list`, builds a per-kernel initramfs with Falco drivers injected, boots it under QEMU, and records PASS/FAIL.
+Drivers are resolved in order:
+
+```
+1. Custom server   →  {server_url}/falco_{distro}_{kver}_x86_64.{ko|o}
+2. Falco CDN       →  CloudFront / S3 listing (automatic fallback)
+```
+
+**Using a local server for testing:**
 
 ```bash
-# All kernels
+# Terminal 1 — start the server
+./test_server/serve.sh          # port 8080
+
+# config/driver_server.yaml
+server_url: http://localhost:8080
+```
+
+Place driver files in `test_server/` using the correct naming format:
+```
+falco_{distro}_{kernel_version}_x86_64.ko
+falco_{distro}_{kernel_version}_x86_64.o
+
+# Examples:
+falco_centos_3.10.0-1160.108.1.el7_x86_64.ko
+falco_ubuntu_5.4.0-52-generic_x86_64.o
+```
+
+If you downloaded drivers manually from the Falco CDN (which includes `_revision` and `_tag`), rename them as follows:
+```bash
+# CDN:  falco_centos_3.10.0-1160.el7.x86_64_1.ko
+# Ours: falco_centos_3.10.0-1160.el7_x86_64.ko
+#       (drop .x86_64 from version, drop _1 revision)
+
+# CDN:  falco_ubuntu-generic_5.4.0-52-generic_57.ko
+# Ours: falco_ubuntu_5.4.0-52-generic_x86_64.ko
+#       (ubuntu-generic → ubuntu, drop _57 revision)
+```
+
+---
+
+### 3. Run tests
+
+```bash
+# All kernels in kernels.list
 ./run_tests.sh
 
 # Filter by distro
 DISTRO=centos ./run_tests.sh
 DISTRO=ubuntu ./run_tests.sh
 
-# Filter by kernel version substring
+# Filter by version (substring match)
 KERNEL_FILTER=4.18.0 ./run_tests.sh
-KERNEL_FILTER=3.10.0-1160.59.1.el7 ./run_tests.sh
+DISTRO=redhat KERNEL_FILTER=5.14.0-570.24.1.el9_6 ./run_tests.sh
 
-# Combine filters
-DISTRO=centos KERNEL_FILTER=4.18.0 ./run_tests.sh
-
-# Re-run even if previously cached
-USE_CACHE=0 ./run_tests.sh
-USE_CACHE=0 KERNEL_FILTER=4.18.0-305 ./run_tests.sh
+# Re-run even if cached
+USE_CACHE=0 DISTRO=almalinux ./run_tests.sh
+USE_CACHE=0 KERNEL_FILTER=4.18.0-553 ./run_tests.sh
 
 # No delay between kernels
 KERNEL_DELAY=0 ./run_tests.sh
 ```
 
-### Result cache
+---
 
-Results are cached in `results/cache.json`. A kernel is only re-tested if it previously timed out or panicked (incomplete runs are never cached). Force re-run with `USE_CACHE=0`.
-
-### Reading logs
-
-Each kernel writes one log file: `results/{kname}.log`
+### 4. Read results
 
 ```bash
-# See result summary
-grep "RESULT:" results/centos-7-3.10.0-1160.59.1.el7.log
+# View result for one kernel
+grep "RESULT:" results/centos-7-3.10.0-1160.108.1.el7.log
 
-# Watch live output of a running test
-tail -f results/centos-7-3.10.0-1160.59.1.el7.log
+# Live follow
+tail -f results/centos-7-3.10.0-1160.108.1.el7.log
 
-# Find all failures
-grep -l "FAIL" results/*.log
+# All FAIL kernels
+grep -rl "status=FAIL" results/*.log
 
-# See last 5 lines of each failed kernel
-for f in results/*.log; do grep -q "status=FAIL" "$f" && echo "=== $f ===" && tail -5 "$f"; done
+# Last 5 lines of each failed kernel
+for f in results/*.log; do
+    grep -q "status=FAIL" "$f" && echo "=== $f ===" && tail -5 "$f"
+done
+
+# Overview from cache
+cat results/cache.json | python3 -m json.tool | grep -E '"status"|"result_line"'
 ```
 
 ---
 
-## Falco Drivers
+## Kernel Management
 
-Drivers are stored as flat files:
-```
-modules/falco_{distro}_{kernel_version}_x86_64.ko
-modules/falco_{distro}_{kernel_version}_x86_64.o
-```
+### Prune — keep N kernels per group
 
-Example: `modules/falco_centos_3.10.0-1160.108.1.el7_x86_64.ko`
-
-### Resolution order
-
-`falco_drivers.sh` tries sources in order:
-
-1. **Custom server** — `{server_url}/falco_{distro}_{kernel_version}_x86_64.{ko|o}`
-2. **Falco CDN** (fallback) — CloudFront + S3 listing search
-
-Configure the custom server in `config/driver_server.yaml`:
-
-```yaml
-server_url: http://your-server:8080   # leave empty to skip
-fallback_url: https://d20hasrqv82i0q.cloudfront.net
-listing_url: https://falco-distribution.s3-eu-west-1.amazonaws.com
-driver_version: "9.1.0+driver"
-```
-
-### Demo / local test server
-
-`test_server/` contains a minimal HTTP server for testing the download pipeline without real drivers.
+Groups are by `(distro, major_version)`: 2.x, 3.x, 4.x, 5.x, 6.x.
 
 ```bash
-# Generate fake driver files for all kernels in kernels.list
-./test_server/generate.sh
-
-# Start the server on port 8080
-./test_server/serve.sh
-
-# Then set in config/driver_server.yaml:
-#   server_url: http://localhost:8080
+python3 prune_kernels.py --dry-run          # preview
+python3 prune_kernels.py --keep 20          # keep 20 per group
+python3 prune_kernels.py --keep 10 centos   # centos only
 ```
 
-Fake files pass the ELF format check but will fail to load inside the VM — sufficient to verify the download + initramfs pipeline.
+Each pruned kernel removes: `kernels/{kname}/`, `initramfs/{kname}.img`, `modules/falco_{...}.ko/.o`
+
+### Clean — remove artifacts
+
+```bash
+./clean.sh                # remove initramfs + results (keep kernels/modules)
+./clean.sh --results      # remove logs only
+./clean.sh --modules      # also remove Falco drivers
+./clean.sh --kernels      # also remove vmlinuz
+./clean.sh --all          # remove everything including Falco binary
+```
 
 ---
 
-## Pruning Kernels (`prune_kernels.py`)
+## Common Workflows
 
-Reduces the kernel set to N per `(distro, major_version)` group. Groups kernels by their leading version digit: 2.x, 3.x, 4.x, 5.x. Deletes all artifacts for pruned kernels.
-
-```bash
-# Preview what would be deleted (safe, no changes)
-python3 prune_kernels.py --dry-run
-
-# Keep 20 newest per group across all distros
-python3 prune_kernels.py --keep 20
-
-# Prune only specific distros
-python3 prune_kernels.py --keep 20 centos almalinux
-
-# Custom keep count
-python3 prune_kernels.py --keep 5 ubuntu
-```
-
-Artifacts removed per pruned kernel:
-- `kernels/{kname}/` — vmlinuz
-- `initramfs/{kname}.img` — per-kernel initramfs
-- `modules/falco_{distro}_{kernel_version}_x86_64.ko/.o` — Falco drivers
-
-`config/kernels.list` is updated automatically.
-
----
-
-## Typical Workflows
-
-### Test mode (limited set)
+### Quick test (limited set)
 
 ```bash
-# Step 1: prune existing kernels down to 20/group
-python3 prune_kernels.py --dry-run    # preview first
-python3 prune_kernels.py --keep 20
-
-# Step 2: run tests on the pruned set
+# Prune down to 5 kernels per group, then test
+python3 prune_kernels.py --keep 5
 ./run_tests.sh
 ```
 
-### Run one specific kernel
+### Sync + test one distro
 
 ```bash
-# Filter by distro + version
-DISTRO=redhat KERNEL_FILTER=5.14.0-570.24.1.el9_6 ./run_tests.sh
-
-# Force re-run ignoring cache
-USE_CACHE=0 DISTRO=centos KERNEL_FILTER=3.10.0-1160.59.1.el7 ./run_tests.sh
+./sync_kernels.sh centos
+DISTRO=centos ./run_tests.sh
 ```
 
-### Full pipeline on a fresh machine
+### Re-test failed kernels
 
 ```bash
-./setup.sh                         # everything (full set)
-TEST_MODE=1 ./setup.sh             # everything (limited set, 20/major)
+# Get list of FAILED kernels from cache
+python3 -c "
+import json
+c = json.load(open('results/cache.json'))
+for k,v in c.items():
+    if v.get('status') == 'FAILED':
+        print(k)
+"
+
+# Re-run with USE_CACHE=0 + filter
+USE_CACHE=0 DISTRO=centos KERNEL_FILTER=4.18.0-305 ./run_tests.sh
 ```
 
-### Sync only, no tests
+### Full pipeline from scratch
 
 ```bash
-./setup.sh --sync-only
-# or
-./sync_kernels.sh
+./setup.sh                    # full
+TEST_MODE=1 ./setup.sh        # limit to 20 per group
+./setup.sh --sync-only        # sync only, no test
 ```
 
-### Re-sync after pruning (restore deleted kernels)
+---
 
-```bash
-./sync_kernels.sh centos           # re-downloads missing centos kernels
-```
+## Supported Distros
+
+| Distro | Versions | Source |
+|--------|----------|--------|
+| CentOS | 6, 7, 8 | `vault.centos.org` |
+| AlmaLinux | 8, 9 | `vault.almalinux.org` |
+| Rocky | 8, 9 | `dl.rockylinux.org/vault/rocky` |
+| Ubuntu | trusty → noble | `archive.ubuntu.com` |
+| Debian | squeeze → bookworm | `snapshot.debian.org` |
+| Oracle | OL6–OL9 (incl. UEK) | `yum.oracle.com` |
+| Red Hat | RHEL6–RHEL9 | RHSM API — requires `offline_token` |
+
+Red Hat requires a subscription. Set `offline_token` in `downloader/redhat/config.yaml`.
 
 ---
 
@@ -264,65 +282,36 @@ TEST_MODE=1 ./setup.sh             # everything (limited set, 20/major)
 
 ```
 kernel-matrix-tester/
-├── setup.sh                   # Full pipeline: prereqs → Falco → base initramfs → sync → test
-├── sync_kernels.sh            # Download vmlinuz per distro, register in kernels.list
-├── run_tests.sh               # Boot test runner (reads kernels.list)
-├── prune_kernels.py           # Trim to N kernels per (distro × major_version)
+│
+├── sync_kernels.sh          # sync vmlinuz from repos
+├── run_tests.sh             # run boot tests
+├── setup.sh                 # full pipeline
+├── prune_kernels.py         # reduce kernel count
+├── clean.sh                 # remove artifacts
 │
 ├── config/
-│   ├── kernels.list           # Test matrix: distro:release:kernel_version
-│   ├── driver_server.yaml     # Custom driver server + Falco CDN fallback config
-│   ├── falco.yaml             # Falco runtime config
-│   └── falco_rules_minimal.yaml
+│   ├── kernels.list         # distro:release:kernel_version
+│   └── driver_server.yaml   # custom server URL + CDN fallback
 │
 ├── downloader/
-│   ├── lib.py                 # Shared HTTP/HTML fetch utilities
-│   ├── filter_urls.py         # URL limiter for TEST_MODE
-│   ├── falco_binary.sh        # Download Falco binary
-│   ├── falco_drivers.sh       # Download Falco .ko/.o (custom server → CDN fallback)
-│   ├── ubuntu/
-│   │   ├── config.yaml        # archive.ubuntu.com config
-│   │   └── crawler.py
-│   ├── centos/
-│   │   ├── config.yaml        # vault.centos.org config (el6/7/8)
-│   │   └── crawler.py
-│   ├── almalinux/
-│   │   ├── config.yaml        # vault.almalinux.org config (al8/9)
-│   │   └── crawler.py
-│   ├── rocky/
-│   │   ├── config.yaml        # dl.rockylinux.org config (r8/9)
-│   │   └── crawler.py
-│   ├── debian/
-│   │   ├── config.yaml        # snapshot.debian.org config
-│   │   └── crawler.py
-│   ├── oracle/
-│   │   ├── config.yaml        # yum.oracle.com config (OL6–OL9, incl. UEK)
-│   │   └── crawler.py
-│   └── redhat/
-│       ├── config.yaml        # RHSM API config — requires offline_token
+│   ├── falco_drivers.sh     # download .ko/.o (custom server → CDN)
+│   └── {distro}/            # per-distro crawler
+│       ├── config.yaml
 │       └── crawler.py
 │
 ├── builder/
-│   ├── build_base.sh          # Build shared base initramfs (Falco + busybox)
-│   └── build_per_kernel.sh    # Inject per-kernel Falco modules into base
+│   ├── build_base.sh        # base initramfs (Falco + busybox)
+│   └── build_per_kernel.sh  # inject driver into base
 │
-├── test_server/               # Local demo driver server
-│   ├── generate.sh            # Generate fake .ko/.o for all kernels in kernels.list
-│   ├── serve.sh               # Start HTTP server on port 8080
-│   └── falco_*.ko / *.o       # Fake driver files (ELF magic, 8 bytes each)
+├── test_server/             # local server for testing
+│   ├── serve.sh             # python3 -m http.server 8080
+│   ├── generate.sh          # generate fake drivers from kernels.list
+│   └── falco_*.ko / *.o     # driver files (real or fake)
 │
-├── kernels/                   # Downloaded vmlinuz files
-│   └── centos-7-3.10.0-1160.108.1.el7/
-│       └── vmlinuz
-├── initramfs-base.img         # Shared base initramfs (built once)
-├── initramfs/                 # Per-kernel initramfs images
-│   └── centos-7-3.10.0-1160.108.1.el7.img
-├── modules/                   # Falco drivers (flat files)
-│   ├── falco_centos_3.10.0-1160.108.1.el7_x86_64.ko
-│   └── falco_centos_3.10.0-1160.108.1.el7_x86_64.o
-└── results/                   # Test outputs
-    ├── cache.json             # Persistent result cache (PASS/FAIL per kernel)
-    └── centos-7-3.10.0-1160.108.1.el7.log
+├── kernels/                 # vmlinuz per distro-release-kver/
+├── initramfs/               # per-kernel initramfs images
+├── modules/                 # falco_{distro}_{kver}_x86_64.{ko|o}
+└── results/                 # *.log + cache.json
 ```
 
 ---
@@ -334,7 +323,6 @@ kernel-matrix-tester/
 centos:7:3.10.0-1160.108.1.el7
 centos:8:4.18.0-553.el8_10
 almalinux:9:5.14.0-503.el9_5
-rocky:8:4.18.0-348.20.1.el8_5
 ubuntu:focal:5.4.0-195-generic
 ubuntu:jammy:5.15.0-139-generic
 debian:bullseye:5.10.0-25-amd64
@@ -342,67 +330,11 @@ oracle:OL8:5.4.17-2136.340.7.4.el8uek
 redhat:rhel9:5.14.0-570.24.1.el9_6
 ```
 
-`kernel_version` is used to construct:
-- kernel dir: `kernels/{distro}-{release}-{kernel_version}/vmlinuz`
-- module files: `modules/falco_{distro}_{kernel_version}_x86_64.ko/.o`
-- initramfs: `initramfs/{distro}-{release}-{kernel_version}.img`
-- results log: `results/{distro}-{release}-{kernel_version}.log`
+From these 3 fields, all artifact paths are derived:
 
----
-
-## Supported Distributions
-
-| Distro | Versions | Source |
-|--------|----------|--------|
-| CentOS | 6, 7, 8 | `vault.centos.org` |
-| AlmaLinux | 8, 9 | `vault.almalinux.org` |
-| Rocky | 8, 9 | `dl.rockylinux.org/vault/rocky` |
-| Ubuntu | trusty → noble | `archive.ubuntu.com` |
-| Debian | squeeze → bookworm | `snapshot.debian.org` |
-| Oracle | OL6–OL9 (incl. UEK) | `yum.oracle.com` |
-| Red Hat | RHEL6–RHEL9 | RHSM API (requires subscription + `offline_token`) |
-
-Red Hat requires a valid `offline_token` set in `downloader/redhat/config.yaml`.
-
----
-
-## Crawlers
-
-Each distro has its own crawler in `downloader/{distro}/`:
-
-```bash
-# List package URLs (no download)
-python3 downloader/centos/crawler.py --list
-python3 downloader/ubuntu/crawler.py --list --verbose
-
-# RedHat only: full download pipeline (handles CDN auth internally)
-python3 downloader/redhat/crawler.py --download \
-    --kernels-dir kernels \
-    --kernels-list config/kernels.list \
-    --max-major 5
-```
-
----
-
-## VM Test Output Format
-
-The init script inside the VM emits structured `[TAG]` lines to serial:
-
-```
-[BOOT] kernel=4.18.0-305.el8.x86_64 arch=x86_64     ← kernel booted successfully
-
-[KO] falco_probe.ko PASS module=falco                 ← .ko loaded OK
-[KO] falco_probe.ko FAIL Operation not permitted      ← .ko load failed
-
-[BPF] falco_probe.o PASS                              ← eBPF probe loaded OK
-[BPF] falco_probe.o SKIP kernel<4.14                  ← kernel too old for eBPF
-
-[FALCO_KO]   PASS engine=kmod events=3                ← Falco ran OK with .ko
-[FALCO_EBPF] FAIL ...                                 ← Falco failed with eBPF
-[FALCO_EBPF] SKIP no-probe                            ← no .o available
-
-RESULT: KO_PASS=1 KO_FAIL=0 BPF_PASS=0 BPF_FAIL=0 BPF_SKIP=1 FALCO_KO=PASS FALCO_EBPF=SKIP
-ALL_DONE
-```
-
-`ALL_DONE` signals a complete test cycle. Kernels that panic or time out before `ALL_DONE` are marked FAILED and not cached.
+| Artifact | Path |
+|----------|------|
+| Kernel | `kernels/{distro}-{release}-{kver}/vmlinuz` |
+| Driver | `modules/falco_{distro}_{kver}_x86_64.{ko\|o}` |
+| Initramfs | `initramfs/{distro}-{release}-{kver}.img` |
+| Log | `results/{distro}-{release}-{kver}.log` |

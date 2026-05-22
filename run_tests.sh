@@ -297,6 +297,8 @@ run_one_kernel() {
             local mt; mt=$(stat -c %Y "$f" 2>/dev/null || echo 0)
             [[ $mt -gt $mod_mtime ]] && mod_mtime=$mt
         done
+        # mod_mtime=0 means no modules on disk → initramfs may contain stale drivers → rebuild
+        [[ $mod_mtime -eq 0 ]] && need_build=1 && rm -f "$initramfs"
         [[ $mod_mtime -gt $img_mtime ]] && need_build=1 && rm -f "$initramfs"
     fi
 
@@ -365,6 +367,11 @@ run_one_kernel() {
         fko=$(grep -oP 'FALCO_KO=\K\S+'   <<< "$rl" || echo SKIP)
         febpf=$(grep -oP 'FALCO_EBPF=\K\S+' <<< "$rl" || echo SKIP)
 
+        local ko_p bpf_p bpf_s
+        ko_p=$(grep -oP 'KO_PASS=\K\d+'   <<< "$rl" || echo 0)
+        bpf_p=$(grep -oP 'BPF_PASS=\K\d+' <<< "$rl" || echo 0)
+        bpf_s=$(grep -oP 'BPF_SKIP=\K\d+' <<< "$rl" || echo 0)
+
         if [[ "${ko_f:-0}" -eq 0 ]] && [[ "${bpf_f:-0}" -eq 0 ]] \
            && [[ "$fko" != "FAIL" ]] && [[ "$febpf" != "FAIL" ]]; then
             status="PASS"
@@ -372,11 +379,20 @@ run_one_kernel() {
             fail_reason=".ko:${ko_f}F .o:${bpf_f}F falco:$fko/$febpf"
         fi
 
-        local ko_p bpf_p bpf_s
-        ko_p=$(grep -oP 'KO_PASS=\K\d+'   <<< "$rl" || echo 0)
-        bpf_p=$(grep -oP 'BPF_PASS=\K\d+' <<< "$rl" || echo 0)
-        bpf_s=$(grep -oP 'BPF_SKIP=\K\d+' <<< "$rl" || echo 0)
-        local summary=".ko: ${ko_p}P/${ko_f}F  .o: ${bpf_p}P/${bpf_f}F/${bpf_s}S  falco: ko=$fko ebpf=$febpf"
+        # Detect boot-only: nothing was actually tested
+        local boot_only=0
+        if [[ "${ko_p:-0}" -eq 0 ]] && [[ "${ko_f:-0}" -eq 0 ]] \
+           && [[ "${bpf_p:-0}" -eq 0 ]] && [[ "${bpf_f:-0}" -eq 0 ]] \
+           && [[ "$fko" == "SKIP" ]] && [[ "$febpf" == "SKIP" ]]; then
+            boot_only=1
+        fi
+
+        local summary
+        if [[ $boot_only -eq 1 ]]; then
+            summary="boot-only (no drivers)"
+        else
+            summary=".ko: ${ko_p}P/${ko_f}F  .o: ${bpf_p}P/${bpf_f}F/${bpf_s}S  falco: ko=$fko ebpf=$febpf"
+        fi
 
         # VM completed — cache result (panic/timeout excluded because ALL_DONE not found)
         cache_write "$kname" "$status" "$elapsed" "$rl"

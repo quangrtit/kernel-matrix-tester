@@ -68,8 +68,8 @@ fi
 # Falco drivers (--modules or --all)
 if [[ "$MODE" == "modules" ]] || [[ "$MODE" == "all" ]]; then
     info "Falco drivers"
-    rm_glob "*/modules/*/*.ko"  "modules/*/*.ko"
-    rm_glob "*/modules/*/*.o"   "modules/*/*.o"
+    rm_glob "*/modules/falco_*.ko"  "modules/falco_*.ko"
+    rm_glob "*/modules/falco_*.o"   "modules/falco_*.o"
 fi
 
 # Falco binary (--all only)
