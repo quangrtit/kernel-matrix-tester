@@ -27,3 +27,5 @@ docx.md
 /downloader/__pycache__
 .tmp
 .claude
+
+/test_server/falco*

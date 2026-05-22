@@ -198,7 +198,8 @@ run_one_kernel() {
     local kname="${distro}-${version}-${kernel_version}"
     local vmlinuz="$PROJECT_ROOT/kernels/$kname/vmlinuz"
     local initramfs="$PROJECT_ROOT/initramfs/${kname}.img"
-    local modules_dir="$PROJECT_ROOT/modules/$kname"
+    local module_ko="$PROJECT_ROOT/modules/falco_${distro}_${kernel_version}_x86_64.ko"
+    local module_o="$PROJECT_ROOT/modules/falco_${distro}_${kernel_version}_x86_64.o"
     local log="$RESULTS_DIR/${kname}.log"
     CURRENT_LOG="$log"
     local status="FAIL" fail_reason=""
@@ -262,9 +263,9 @@ run_one_kernel() {
         kmaj=$(cut -d. -f1 <<< "$uname_r")
         kmin=$(cut -d. -f2 <<< "$uname_r")
         local need_ko=0 need_o=0
-        [[ ! -f "$modules_dir/falco_probe.ko" ]] && need_ko=1
+        [[ ! -f "$module_ko" ]] && need_ko=1
         if [[ "$kmaj" -gt 4 ]] || { [[ "$kmaj" -eq 4 ]] && [[ "$kmin" -ge 14 ]]; }; then
-            [[ ! -f "$modules_dir/falco_probe.o" ]] && need_o=1
+            [[ ! -f "$module_o" ]] && need_o=1
         fi
 
         if [[ $need_ko -eq 0 ]] && [[ $need_o -eq 0 ]]; then
@@ -274,8 +275,8 @@ run_one_kernel() {
                 < /dev/null >> "$log" 2>&1 \
                 || skip "No prebuilt drivers found — Falco tests will be SKIP"
         fi
-        [[ -f "$modules_dir/falco_probe.ko" ]] && ok "falco_probe.ko"
-        [[ -f "$modules_dir/falco_probe.o"  ]] && ok "falco_probe.o"
+        [[ -f "$module_ko" ]] && ok "$(basename "$module_ko")"
+        [[ -f "$module_o"  ]] && ok "$(basename "$module_o")"
     fi
 
     # ── 3: Build initramfs ──────────────────────────────────────────────────
@@ -291,7 +292,7 @@ run_one_kernel() {
     else
         local img_mtime mod_mtime=0
         img_mtime=$(stat -c %Y "$initramfs" 2>/dev/null || echo 0)
-        for f in "$modules_dir"/*.ko "$modules_dir"/*.o; do
+        for f in "$module_ko" "$module_o"; do
             [[ -f "$f" ]] || continue
             local mt; mt=$(stat -c %Y "$f" 2>/dev/null || echo 0)
             [[ $mt -gt $mod_mtime ]] && mod_mtime=$mt

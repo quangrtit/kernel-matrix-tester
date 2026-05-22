@@ -28,7 +28,10 @@ if [[ ! -d /tmp ]] || [[ ! -w /tmp ]]; then
     mkdir -p "$TMPDIR"
 fi
 
-MODULES_DIR="$PROJECT_ROOT/modules/$KERNEL_NAME"
+DISTRO=$(cut -d- -f1 <<< "$KERNEL_NAME")
+KVER=$(cut -d- -f3- <<< "$KERNEL_NAME")
+KO_FILE="$PROJECT_ROOT/modules/falco_${DISTRO}_${KVER}_x86_64.ko"
+O_FILE="$PROJECT_ROOT/modules/falco_${DISTRO}_${KVER}_x86_64.o"
 OUTPUT_IMG="$PROJECT_ROOT/initramfs/${KERNEL_NAME}.img"
 mkdir -p "$(dirname "$OUTPUT_IMG")"
 
@@ -53,17 +56,15 @@ fi
 
 # Inject kernel-specific modules if available
 mkdir -p lib/modules
-if [[ -d "$MODULES_DIR" ]]; then
-    echo "Injecting modules from $MODULES_DIR..."
-    for module in "$MODULES_DIR"/*.ko "$MODULES_DIR"/*.o; do
-        if [[ -f "$module" ]]; then
-            cp "$module" lib/modules/
-            echo "  Added: $(basename "$module")"
-        fi
-    done
-else
-    echo "WARN: No modules dir found at $MODULES_DIR — boot test only"
-fi
+injected=0
+for module_file in "$KO_FILE" "$O_FILE"; do
+    if [[ -f "$module_file" ]]; then
+        cp "$module_file" lib/modules/
+        echo "  Added: $(basename "$module_file")"
+        injected=1
+    fi
+done
+[[ $injected -eq 0 ]] && echo "WARN: No modules found for $KERNEL_NAME — boot test only"
 
 # Repack into new initramfs (must cd into rootfs for relative paths)
 cd "$WORK_DIR/rootfs"
